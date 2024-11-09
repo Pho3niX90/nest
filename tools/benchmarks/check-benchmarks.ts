@@ -67,10 +67,10 @@ function getLongDescription(
   function printTableRow(id: string, label: string): string[] {
     return [
       label,
-      current[id].requestsPerSec.toFixed(0),
-      current[id].transferPerSec,
-      baseline ? formatPerc(diff[id].requestsPerSecDiff) : '-',
-      baseline ? formatPerc(diff[id].transferPerSecDiff) : '-',
+      current[id]?.requestsPerSec.toFixed(0),
+      current[id]?.transferPerSec,
+      baseline ? formatPerc(diff[id]?.requestsPerSecDiff) : '-',
+      baseline ? formatPerc(diff[id]?.transferPerSecDiff) : '-',
     ];
   }
 
@@ -78,8 +78,10 @@ function getLongDescription(
     ['', 'Req/sec', 'Trans/sec', 'Req/sec DIFF', 'Trans/sec DIFF'],
     printTableRow('nest', 'Nest-Express'),
     printTableRow('nest-fastify', 'Nest-Fastify'),
+    printTableRow('nest-ultimate-express', 'Nest-Ultimate-Express'),
     printTableRow('express', 'Express'),
     printTableRow('fastify', 'Fastify'),
+    printTableRow('ultimate-express', 'UltimateExpress'),
   ];
 
   return markdownTable(table);
@@ -101,12 +103,12 @@ function getDiff(
 
     diff[l] = {
       requestsPerSecDiff: getRequestDiff(
-        currentValue.requestsPerSec,
-        baselineValue.requestsPerSec,
+        currentValue?.requestsPerSec,
+        baselineValue?.requestsPerSec,
       ),
       transferPerSecDiff: getTransferDiff(
-        currentValue.transferPerSec,
-        baselineValue.transferPerSec,
+        currentValue?.transferPerSec,
+        baselineValue?.transferPerSec,
       ),
     };
   }

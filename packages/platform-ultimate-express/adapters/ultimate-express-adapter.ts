@@ -1,13 +1,14 @@
 import type { Server } from 'http';
+import * as http from 'http';
 import {
   HttpStatus,
   InternalServerErrorException,
   Logger,
   RequestMethod,
   StreamableFile,
+  VERSION_NEUTRAL,
   VersioningOptions,
   VersioningType,
-  VERSION_NEUTRAL,
 } from '@nestjs/common';
 import { VersionValue } from '@nestjs/common/interfaces';
 import {
@@ -18,24 +19,17 @@ import { NestApplicationOptions } from '@nestjs/common/interfaces/nest-applicati
 import {
   isFunction,
   isNil,
-  isObject,
   isString,
   isUndefined,
 } from '@nestjs/common/utils/shared.utils';
 import { AbstractHttpAdapter } from '@nestjs/core/adapters/http-adapter';
 import { RouterMethodFactory } from '@nestjs/core/helpers/router-method-factory';
-import {
-  json as bodyParserJson,
-  urlencoded as bodyParserUrlencoded,
-} from 'body-parser';
-import * as bodyparser from 'body-parser';
 import * as cors from 'cors';
-import * as express from 'express';
-import * as http from 'http';
+import * as express from 'ultimate-express';
 import * as https from 'https';
 import { Duplex, pipeline } from 'stream';
-import { NestExpressBodyParserOptions } from '../interfaces/nest-express-body-parser-options.interface';
-import { NestExpressBodyParserType } from '../interfaces/nest-express-body-parser.interface';
+import { NestUltimateExpressBodyParserOptions } from '../interfaces/nest-ultimate-express-body-parser-options.interface';
+import { NestUltimateExpressBodyParserType } from '../interfaces/nest-ultimate-express-body-parser.interface';
 import { ServeStaticOptions } from '../interfaces/serve-static-options.interface';
 import { getBodyParserOptions } from './utils/get-body-parser-options.util';
 import { VersionedRoute } from '@nestjs/common/interfaces/versioned-route.interface';
@@ -43,11 +37,11 @@ import { VersionedRoute } from '@nestjs/common/interfaces/versioned-route.interf
 /**
  * @publicApi
  */
-export class ExpressAdapter extends AbstractHttpAdapter<
+export class UltimateExpressAdapter extends AbstractHttpAdapter<
   http.Server | https.Server
 > {
   private readonly routerMethodFactory = new RouterMethodFactory();
-  private readonly logger = new Logger(ExpressAdapter.name);
+  private readonly logger = new Logger(UltimateExpressAdapter.name);
   private readonly openConnections = new Set<Duplex>();
 
   constructor(instance?: any) {
@@ -104,7 +98,7 @@ export class ExpressAdapter extends AbstractHttpAdapter<
       );
       response.setHeader('Content-Type', 'application/json');
     }
-    return isObject(body) ? response.json(body) : response.send(String(body));
+    return response.send(body);
   }
 
   public status(response: any, statusCode: number) {
@@ -222,16 +216,7 @@ export class ExpressAdapter extends AbstractHttpAdapter<
   }
 
   public initHttpServer(options: NestApplicationOptions) {
-    const isHttpsEnabled = options && options.httpsOptions;
-    if (isHttpsEnabled) {
-      this.httpServer = https.createServer(
-        options.httpsOptions,
-        this.getInstance(),
-      );
-    } else {
-      this.httpServer = http.createServer(this.getInstance());
-    }
-
+    this.httpServer = this.instance;
     if (options?.forceCloseConnections) {
       this.trackOpenConnections();
     }
@@ -244,21 +229,22 @@ export class ExpressAdapter extends AbstractHttpAdapter<
     });
 
     const parserMiddleware = {
-      jsonParser: bodyParserJson(bodyParserJsonOptions),
-      urlencodedParser: bodyParserUrlencoded(bodyParserUrlencodedOptions),
+      jsonParser: express.json(bodyParserJsonOptions),
+      urlencodedParser: express.urlencoded(bodyParserUrlencodedOptions),
     };
+
     Object.keys(parserMiddleware)
       .filter(parser => !this.isMiddlewareApplied(parser))
       .forEach(parserKey => this.use(parserMiddleware[parserKey]));
   }
 
-  public useBodyParser<Options = NestExpressBodyParserOptions>(
-    type: NestExpressBodyParserType,
+  public useBodyParser<Options = NestUltimateExpressBodyParserOptions>(
+    type: NestUltimateExpressBodyParserType,
     rawBody: boolean,
     options?: Omit<Options, 'verify'>,
   ): this {
     const parserOptions = getBodyParserOptions<Options>(rawBody, options);
-    const parser = bodyparser[type](parserOptions);
+    const parser = this.instance[type](parserOptions);
 
     this.use(parser);
 
@@ -271,7 +257,7 @@ export class ExpressAdapter extends AbstractHttpAdapter<
   }
 
   public getType(): string {
-    return 'express';
+    return 'ultimate-express';
   }
 
   public applyVersionFilter(
@@ -293,15 +279,12 @@ export class ExpressAdapter extends AbstractHttpAdapter<
       // URL Versioning is done via the path, so the filter continues forward
       versioningOptions.type === VersioningType.URI
     ) {
-      const handlerForNoVersioning: VersionedRoute = (req, res, next) =>
-        handler(req, res, next);
-
-      return handlerForNoVersioning;
+      return (req, res, next) => handler(req, res, next);
     }
 
     // Custom Extractor Versioning Handler
     if (versioningOptions.type === VersioningType.CUSTOM) {
-      const handlerForCustomVersioning: VersionedRoute = (req, res, next) => {
+      return (req, res, next) => {
         const extractedVersion = versioningOptions.extractor(req);
 
         if (Array.isArray(version)) {
@@ -337,17 +320,11 @@ export class ExpressAdapter extends AbstractHttpAdapter<
 
         return callNextHandler(req, res, next);
       };
-
-      return handlerForCustomVersioning;
     }
 
     // Media Type (Accept Header) Versioning Handler
     if (versioningOptions.type === VersioningType.MEDIA_TYPE) {
-      const handlerForMediaTypeVersioning: VersionedRoute = (
-        req,
-        res,
-        next,
-      ) => {
+      return (req, res, next) => {
         const MEDIA_TYPE_HEADER = 'Accept';
         const acceptHeaderValue: string | undefined =
           req.headers?.[MEDIA_TYPE_HEADER] ||
@@ -382,13 +359,11 @@ export class ExpressAdapter extends AbstractHttpAdapter<
 
         return callNextHandler(req, res, next);
       };
-
-      return handlerForMediaTypeVersioning;
     }
 
     // Header Versioning Handler
     if (versioningOptions.type === VersioningType.HEADER) {
-      const handlerForHeaderVersioning: VersionedRoute = (req, res, next) => {
+      return (req, res, next) => {
         const customHeaderVersionParameter: string | undefined =
           req.headers?.[versioningOptions.header] ||
           req.headers?.[versioningOptions.header.toLowerCase()];
@@ -414,8 +389,6 @@ export class ExpressAdapter extends AbstractHttpAdapter<
 
         return callNextHandler(req, res, next);
       };
-
-      return handlerForHeaderVersioning;
     }
   }
 
